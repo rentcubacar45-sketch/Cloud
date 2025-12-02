@@ -1,8 +1,6 @@
 """
 🤖 BOT NEXTCLOUD UO - ERIC SERRANO
-Versión: python-telegram-bot 21.7
-Python: 3.13 compatible
-Modo: Stealth (cliente oficial)
+Versión optimizada para Render + Python 3.13
 """
 
 import os
@@ -10,18 +8,17 @@ import sys
 import logging
 import requests
 import tempfile
-import time
 import random
 import hashlib
 from datetime import datetime
 from pathlib import Path
-import asyncio
+import signal
 
 # ================================
 # CONFIGURACIÓN PRINCIPAL
 # ================================
 TELEGRAM_TOKEN = '8221776242:AAG_FzrirAxdM4EXfM5ctiQuazyFMyWKmsU'
-ALLOWED_USERNAME = 'eliel_21'  # en minúsculas
+ALLOWED_USERNAME = 'eliel_21'
 
 NEXTCLOUD_URL = 'https://nube.uo.edu.cu'
 NEXTCLOUD_USER = 'eric.serrano'
@@ -41,33 +38,15 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ================================
-# IMPORTAR TELEGRAM BOT 21.7
+# CLIENTE NEXTCLOUD SIMPLIFICADO
 # ================================
-print("🚀 Cargando python-telegram-bot 21.7...")
-try:
-    from telegram import Update
-    from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-    print("✅ Telegram Bot 21.7 cargado correctamente")
-except ImportError as e:
-    print(f"❌ Error cargando Telegram Bot: {e}")
-    print("\n⚠️  Verifica que requirements.txt tenga:")
-    print("python-telegram-bot==21.7")
-    sys.exit(1)
-
-# ================================
-# CLIENTE STEALTH PARA NEXTCLOUD UO
-# ================================
-class NextcloudStealthClient:
-    """Cliente que simula ser cliente oficial de Nextcloud"""
+class NextcloudUOClient:
+    """Cliente para nube.uo.edu.cu"""
     
     USER_AGENTS = [
         'Mozilla/5.0 (Linux) mirall/3.7.4',
         'Nextcloud-android/3.20.1',
         'ios/15.0 (iPhone) Nextcloud-iOS/4.3.0',
-        'Mozilla/5.0 (X11; Linux x86_64) mirall/3.6.1',
-        'nextcloud-cmd/1.0',
-        'Mozilla/5.0 (compatible; Nextcloud-Client)',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Nextcloud-DesktopClient/3.7.4',
     ]
     
     def __init__(self):
@@ -76,30 +55,26 @@ class NextcloudStealthClient:
         self.password = NEXTCLOUD_PASSWORD
         self.session = requests.Session()
         self.session.verify = False
-        self._rotate_user_agent()
-        
-        self.headers = {
-            'Accept': 'application/json, text/plain, */*',
-            'Accept-Language': 'es, en-US;q=0.9, en;q=0.8',
-            'Connection': 'keep-alive',
-        }
-        self.session.headers.update(self.headers)
     
-    def _rotate_user_agent(self):
-        """Cambia el User-Agent aleatoriamente"""
-        self.session.headers.update({
-            'User-Agent': random.choice(self.USER_AGENTS)
-        })
+    def _get_headers(self):
+        """Headers para simular cliente oficial"""
+        return {
+            'User-Agent': random.choice(self.USER_AGENTS),
+            'Accept': '*/*',
+        }
     
     def test_connection(self):
-        """Prueba conexión simulando cliente oficial"""
+        """Prueba conexión al servidor"""
         try:
-            self._rotate_user_agent()
             url = f"{self.base_url}/status.php"
-            response = self.session.get(
+            headers = self._get_headers()
+            
+            response = requests.get(
                 url,
                 auth=(self.username, self.password),
-                timeout=10
+                headers=headers,
+                timeout=10,
+                verify=False
             )
             
             if response.status_code == 200:
@@ -110,108 +85,43 @@ class NextcloudStealthClient:
         except Exception as e:
             return False, f"❌ Error: {str(e)}"
     
-    def create_folder(self, folder_path):
-        """Crea carpeta en Nextcloud"""
-        try:
-            if not folder_path.startswith('/'):
-                folder_path = '/' + folder_path
-            
-            self._rotate_user_agent()
-            webdav_url = f"{self.base_url}/remote.php/dav/files/{self.username}{folder_path}"
-            
-            response = self.session.request(
-                'MKCOL',
-                webdav_url,
-                auth=(self.username, self.password),
-                timeout=10
-            )
-            
-            if response.status_code in [201, 405]:
-                logger.info(f"📁 Carpeta creada: {folder_path}")
-                return True
-            else:
-                logger.warning(f"No se pudo crear {folder_path}: {response.status_code}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"Error creando carpeta: {e}")
-            return False
-    
     def upload_file(self, file_path, remote_filename):
         """Sube archivo a Nextcloud"""
         try:
-            self._rotate_user_agent()
             url = f"{self.base_url}/remote.php/dav/files/{self.username}/{remote_filename}"
-            
-            # Calcular MD5 para header OC-Checksum (como clientes oficiales)
-            file_hash = self._calculate_md5(file_path)
-            
-            headers = {
-                'Content-Type': 'application/octet-stream',
-                'OC-Checksum': f'MD5:{file_hash}',
-            }
-            
-            with open(file_path, 'rb') as f:
-                response = self.session.put(
-                    url,
-                    auth=(self.username, self.password),
-                    data=f,
-                    headers=headers,
-                    timeout=30
-                )
-            
-            if response.status_code in [201, 204]:
-                return True, f"✅ Subido: {remote_filename}"
-            else:
-                # Intentar método alternativo sin headers especiales
-                return self._upload_simple(file_path, remote_filename)
-                
-        except Exception as e:
-            logger.error(f"Error subiendo archivo: {e}")
-            return False, f"❌ Error: {str(e)}"
-    
-    def _upload_simple(self, file_path, remote_filename):
-        """Método alternativo más simple"""
-        try:
-            url = f"{self.base_url}/remote.php/dav/files/{self.username}/{remote_filename}"
+            headers = self._get_headers()
             
             with open(file_path, 'rb') as f:
                 response = requests.put(
                     url,
                     auth=(self.username, self.password),
                     data=f,
+                    headers=headers,
                     timeout=30,
                     verify=False
                 )
             
             if response.status_code in [201, 204]:
-                return True, f"✅ Subido (método simple): {remote_filename}"
+                return True, f"✅ Subido: {remote_filename}"
             else:
                 return False, f"❌ Error {response.status_code}"
                 
         except Exception as e:
-            return False, f"❌ Error simple: {str(e)}"
-    
-    def _calculate_md5(self, file_path):
-        """Calcula MD5 del archivo"""
-        hasher = hashlib.md5()
-        with open(file_path, 'rb') as f:
-            for chunk in iter(lambda: f.read(4096), b''):
-                hasher.update(chunk)
-        return hasher.hexdigest()
+            logger.error(f"Error subiendo: {e}")
+            return False, f"❌ Error: {str(e)}"
     
     def get_remote_path(self, filename):
-        """Determina ruta remota basado en extensión"""
+        """Determina ruta remota"""
         ext = Path(filename).suffix.lower()
         
         # Definir carpetas
-        if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp', '.svg']:
+        if ext in ['.jpg', '.jpeg', '.png', '.gif', '.bmp', '.webp']:
             folder = '/Telegram_Bot/Imagenes'
-        elif ext in ['.pdf', '.doc', '.docx', '.txt', '.rtf', '.odt', '.md']:
+        elif ext in ['.pdf', '.doc', '.docx', '.txt', '.rtf']:
             folder = '/Telegram_Bot/Documentos'
-        elif ext in ['.mp3', '.wav', '.ogg', '.flac', '.m4a', '.aac']:
+        elif ext in ['.mp3', '.wav', '.ogg', '.flac']:
             folder = '/Telegram_Bot/Audio'
-        elif ext in ['.mp4', '.avi', '.mkv', '.mov', '.wmv', '.flv']:
+        elif ext in ['.mp4', '.avi', '.mkv', '.mov']:
             folder = '/Telegram_Bot/Video'
         else:
             folder = '/Telegram_Bot/Otros'
@@ -227,38 +137,45 @@ class NextcloudStealthClient:
 # INICIALIZACIÓN
 # ================================
 print("=" * 60)
-print("🤖 BOT NEXTCLOUD UO - VERSIÓN 21.7")
+print("🤖 BOT NEXTCLOUD UO - ERIC SERRANO")
 print("=" * 60)
 print(f"🔗 Servidor: {NEXTCLOUD_URL}")
 print(f"👤 Usuario: {NEXTCLOUD_USER}")
 print(f"📱 Telegram: Solo para @{ALLOWED_USERNAME}")
 print("=" * 60)
 
-nc_client = NextcloudStealthClient()
+nc_client = NextcloudUOClient()
 
 # Probar conexión
 print("\n🔍 Probando conexión a Nextcloud...")
 success, msg = nc_client.test_connection()
 print(f"📡 {msg}")
 
-if success:
-    print("\n📁 Creando estructura de carpetas...")
-    folders = [
-        '/Telegram_Bot',
-        '/Telegram_Bot/Documentos',
-        '/Telegram_Bot/Imagenes',
-        '/Telegram_Bot/Audio',
-        '/Telegram_Bot/Video',
-        '/Telegram_Bot/Otros'
-    ]
-    for folder in folders:
-        if nc_client.create_folder(folder):
-            print(f"✅ {folder} lista")
-else:
-    print("⚠️ Continuando con conexión limitada")
+# ================================
+# MANEJO DE SEÑALES PARA RENDER
+# ================================
+def signal_handler(signum, frame):
+    """Maneja señales de terminación"""
+    print(f"\n📡 Señal {signum} recibida. Deteniendo bot...")
+    sys.exit(0)
+
+signal.signal(signal.SIGTERM, signal_handler)
+signal.signal(signal.SIGINT, signal_handler)
 
 # ================================
-# SEGURIDAD - SOLO USUARIO AUTORIZADO
+# IMPORTAR TELEGRAM BOT
+# ================================
+print("\n📦 Cargando Telegram Bot...")
+try:
+    from telegram import Update
+    from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+    print("✅ Telegram Bot cargado correctamente")
+except ImportError as e:
+    print(f"❌ Error: {e}")
+    sys.exit(1)
+
+# ================================
+# SEGURIDAD
 # ================================
 def is_user_allowed(user):
     """Verifica si el usuario está autorizado"""
@@ -287,7 +204,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         return
     
     user = update.effective_user
-    success, msg = nc_client.test_connection()
     
     welcome_text = f"""
 🤖 *BOT NEXTCLOUD UO - Eric Serrano*
@@ -295,8 +211,6 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 ¡Hola {user.first_name}! 👋
 
 *Usuario:* ✅ @{user.username}
-*Estado:* {msg}
-
 *Servidor:* `{NEXTCLOUD_URL}`
 *Cuenta:* `{NEXTCLOUD_USER}`
 
@@ -325,9 +239,8 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 *Detalles:*
 • Servidor: `{NEXTCLOUD_URL}`
-• Usuario Nextcloud: `{NEXTCLOUD_USER}`
-• Usuario Telegram: @{update.effective_user.username}
-• Bot: ✅ Activo
+• Usuario: `{NEXTCLOUD_USER}`
+• Telegram: @{update.effective_user.username}
     """
     
     await update.message.reply_text(status_text, parse_mode='Markdown')
@@ -346,8 +259,8 @@ Usuario: {NEXTCLOUD_USER}
 """
     
     with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp:
-        tmp.write(test_content)
         temp_path = tmp.name
+        tmp.write(test_content)
     
     try:
         filename = f"prueba_bot_{datetime.now().strftime('%H%M%S')}.txt"
@@ -376,38 +289,30 @@ Usuario: {NEXTCLOUD_USER}
         if os.path.exists(temp_path):
             os.unlink(temp_path)
 
-async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja documentos"""
+async def handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja cualquier archivo"""
     if not await check_auth(update):
         return
     
-    await _handle_file(update, update.message.document, "📄 Documento")
-
-async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja fotos"""
-    if not await check_auth(update):
-        return
-    
-    await _handle_file(update, update.message.photo[-1], "🖼️ Imagen")
-
-async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja audio"""
-    if not await check_auth(update):
-        return
-    
-    await _handle_file(update, update.message.audio, "🎵 Audio")
-
-async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja video"""
-    if not await check_auth(update):
-        return
-    
-    await _handle_file(update, update.message.video, "🎬 Video")
-
-async def _handle_file(update: Update, file_obj, file_type):
-    """Maneja cualquier tipo de archivo"""
     try:
-        # Obtener información del archivo
+        # Determinar tipo de archivo
+        if update.message.document:
+            file_obj = update.message.document
+            file_type = "📄 Documento"
+        elif update.message.photo:
+            file_obj = update.message.photo[-1]
+            file_type = "🖼️ Imagen"
+        elif update.message.audio:
+            file_obj = update.message.audio
+            file_type = "🎵 Audio"
+        elif update.message.video:
+            file_obj = update.message.video
+            file_type = "🎬 Video"
+        else:
+            await update.message.reply_text("❌ Tipo no soportado")
+            return
+        
+        # Obtener nombre
         if hasattr(file_obj, 'file_name') and file_obj.file_name:
             original_name = file_obj.file_name
         else:
@@ -446,11 +351,11 @@ async def _handle_file(update: Update, file_obj, file_type):
         # Subir archivo
         success, message = nc_client.upload_file(temp_path, remote_path)
         
-        # Limpiar archivo temporal
+        # Limpiar
         if os.path.exists(temp_path):
             os.unlink(temp_path)
         
-        # Resultado final
+        # Resultado
         if success:
             await msg.edit_text(
                 f"✅ *Subida exitosa!*\n\n"
@@ -467,7 +372,7 @@ async def _handle_file(update: Update, file_obj, file_type):
             )
             
     except Exception as e:
-        logger.error(f"Error procesando archivo: {e}")
+        logger.error(f"Error: {e}")
         await update.message.reply_text(f"❌ Error: {str(e)[:200]}")
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -489,66 +394,65 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
     logger.error(f"Error: {context.error}")
     try:
         if update and update.message:
-            await update.message.reply_text(
-                "❌ Ocurrió un error inesperado.",
-                parse_mode='Markdown'
-            )
+            await update.message.reply_text("❌ Ocurrió un error.")
     except:
         pass
 
 # ================================
-# FUNCIÓN PRINCIPAL
+# FUNCIÓN PRINCIPAL OPTIMIZADA
 # ================================
-async def main():
-    """Función principal"""
-    print("\n🤖 Inicializando bot de Telegram...")
+def main():
+    """Función principal optimizada para Render"""
+    print("\n🤖 Iniciando bot de Telegram...")
     
     if not TELEGRAM_TOKEN:
-        print("❌ ERROR: Token de Telegram no configurado")
+        print("❌ ERROR: Token no configurado")
         return
     
     try:
         # Crear aplicación
-        application = Application.builder().token(TELEGRAM_TOKEN).build()
+        app = Application.builder().token(TELEGRAM_TOKEN).build()
         
         # Comandos
-        application.add_handler(CommandHandler("start", start))
-        application.add_handler(CommandHandler("status", status))
-        application.add_handler(CommandHandler("test", test))
+        app.add_handler(CommandHandler("start", start))
+        app.add_handler(CommandHandler("status", status))
+        app.add_handler(CommandHandler("test", test))
         
         # Handlers de archivos
-        application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
-        application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
-        application.add_handler(MessageHandler(filters.AUDIO, handle_audio))
-        application.add_handler(MessageHandler(filters.VIDEO, handle_video))
+        app.add_handler(MessageHandler(filters.Document.ALL, handle_file))
+        app.add_handler(MessageHandler(filters.PHOTO, handle_file))
+        app.add_handler(MessageHandler(filters.AUDIO, handle_file))
+        app.add_handler(MessageHandler(filters.VIDEO, handle_file))
         
         # Handler por defecto
-        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown))
+        app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown))
         
         # Error handler
-        application.add_error_handler(error_handler)
+        app.add_error_handler(error_handler)
         
-        print("✅ Bot configurado correctamente")
-        print("📱 Busca tu bot en Telegram y envía /start")
-        print("\n" + "=" * 60)
+        print("✅ Bot listo")
+        print("📱 Envía /start a tu bot en Telegram")
+        print("\n🔄 Bot en ejecución...")
         
-        # Iniciar bot
-        await application.run_polling()
+        # Iniciar bot (forma simplificada)
+        app.run_polling()
         
     except Exception as e:
-        print(f"\n❌ Error al iniciar bot: {e}")
-        print("\nPosibles causas:")
-        print("1. Token incorrecto")
-        print("2. Bot ya está ejecutándose")
-        print("3. Problemas de red")
+        print(f"\n❌ Error: {e}")
+        print("\n⚠️  Verifica:")
+        print("1. Token correcto")
+        print("2. No hay otro bot ejecutándose")
+        print("3. Conexión a internet")
 
 # ================================
 # PUNTO DE ENTRADA
 # ================================
 if __name__ == '__main__':
     try:
-        asyncio.run(main())
+        main()
     except KeyboardInterrupt:
         print("\n👋 Bot detenido")
+    except SystemExit:
+        print("\n🛑 Bot terminado")
     except Exception as e:
-        print(f"\n❌ Error: {e}")
+        print(f"\n💥 Error crítico: {e}")
