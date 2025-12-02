@@ -17,7 +17,7 @@ import signal
 # ================================
 # CONFIGURACIÓN PRINCIPAL
 # ================================
-TELEGRAM_TOKEN = '8221776242:AAG_FzrirAxdM4EXfM5ctiQuazyFMyWKmsU'
+TELEGRAM_TOKEN = '8503832757:AAHJ7cuRJnu-cYtA_87Mwyu9RgHtbHLW0_k'
 ALLOWED_USERNAME = 'eliel_21'
 
 NEXTCLOUD_URL = 'https://nube.uo.edu.cu'
