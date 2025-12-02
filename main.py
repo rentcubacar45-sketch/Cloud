@@ -1,8 +1,8 @@
 """
 🤖 BOT NEXTCLOUD UO - ERIC SERRANO
-Versión: Python 3.13 + python-telegram-bot 21.7
+Versión: python-telegram-bot 21.7
+Python: 3.13 compatible
 Modo: Stealth (cliente oficial)
-Solo para: @Eliel_21
 """
 
 import os
@@ -41,17 +41,17 @@ import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
 
 # ================================
-# IMPORTAR TELEGRAM BOT VERSIÓN 21.x
+# IMPORTAR TELEGRAM BOT 21.7
 # ================================
-print("🚀 Cargando Telegram Bot (versión 21.x)...")
+print("🚀 Cargando python-telegram-bot 21.7...")
 try:
     from telegram import Update
     from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
-    print("✅ Telegram Bot cargado correctamente")
+    print("✅ Telegram Bot 21.7 cargado correctamente")
 except ImportError as e:
     print(f"❌ Error cargando Telegram Bot: {e}")
-    print("\n⚠️  Instala la versión correcta:")
-    print("pip install python-telegram-bot==21.7")
+    print("\n⚠️  Verifica que requirements.txt tenga:")
+    print("python-telegram-bot==21.7")
     sys.exit(1)
 
 # ================================
@@ -60,7 +60,6 @@ except ImportError as e:
 class NextcloudStealthClient:
     """Cliente que simula ser cliente oficial de Nextcloud"""
     
-    # User-Agents de clientes oficiales
     USER_AGENTS = [
         'Mozilla/5.0 (Linux) mirall/3.7.4',
         'Nextcloud-android/3.20.1',
@@ -68,7 +67,7 @@ class NextcloudStealthClient:
         'Mozilla/5.0 (X11; Linux x86_64) mirall/3.6.1',
         'nextcloud-cmd/1.0',
         'Mozilla/5.0 (compatible; Nextcloud-Client)',
-        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Nextcloud-DesktopClient/3.7.4',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 Nextcloud-DesktopClient/3.7.4',
     ]
     
     def __init__(self):
@@ -76,17 +75,13 @@ class NextcloudStealthClient:
         self.username = NEXTCLOUD_USER
         self.password = NEXTCLOUD_PASSWORD
         self.session = requests.Session()
-        
-        # Configurar sesión para evitar bloqueos
         self.session.verify = False
         self._rotate_user_agent()
         
-        # Headers que simulan cliente oficial
         self.headers = {
             'Accept': 'application/json, text/plain, */*',
             'Accept-Language': 'es, en-US;q=0.9, en;q=0.8',
             'Connection': 'keep-alive',
-            'DNT': '1',
         }
         self.session.headers.update(self.headers)
     
@@ -100,8 +95,6 @@ class NextcloudStealthClient:
         """Prueba conexión simulando cliente oficial"""
         try:
             self._rotate_user_agent()
-            
-            # Probar con endpoint de estado
             url = f"{self.base_url}/status.php"
             response = self.session.get(
                 url,
@@ -110,38 +103,30 @@ class NextcloudStealthClient:
             )
             
             if response.status_code == 200:
-                return True, "✅ Conectado a Nextcloud UO (modo stealth)"
+                return True, "✅ Conectado a Nextcloud UO"
             else:
                 return False, f"❌ Error {response.status_code}"
                 
         except Exception as e:
-            return False, f"❌ Error de conexión: {str(e)}"
+            return False, f"❌ Error: {str(e)}"
     
     def create_folder(self, folder_path):
-        """Crea carpeta usando WebDAV con headers de cliente oficial"""
+        """Crea carpeta en Nextcloud"""
         try:
             if not folder_path.startswith('/'):
                 folder_path = '/' + folder_path
             
             self._rotate_user_agent()
-            
             webdav_url = f"{self.base_url}/remote.php/dav/files/{self.username}{folder_path}"
-            
-            # Headers específicos para WebDAV de Nextcloud
-            dav_headers = {
-                **self.headers,
-                'Depth': '1',
-            }
             
             response = self.session.request(
                 'MKCOL',
                 webdav_url,
                 auth=(self.username, self.password),
-                headers=dav_headers,
                 timeout=10
             )
             
-            if response.status_code in [201, 405]:  # 201=Creado, 405=Ya existe
+            if response.status_code in [201, 405]:
                 logger.info(f"📁 Carpeta creada: {folder_path}")
                 return True
             else:
@@ -153,84 +138,40 @@ class NextcloudStealthClient:
             return False
     
     def upload_file(self, file_path, remote_filename):
-        """Sube archivo usando múltiples métodos stealth"""
-        methods = [
-            self._upload_via_webdav_stealth,
-            self._upload_via_put_direct,
-            self._upload_via_basic_auth,
-        ]
-        
-        for method in methods:
-            try:
-                self._rotate_user_agent()
-                logger.info(f"🔧 Probando método: {method.__name__}")
-                success, message = method(file_path, remote_filename)
-                if success:
-                    return success, message
-                time.sleep(0.5)  # Pequeña pausa
-            except Exception as e:
-                logger.warning(f"⚠️ Método {method.__name__} falló: {e}")
-        
-        return False, "❌ Todos los métodos de subida fallaron"
-    
-    def _upload_via_webdav_stealth(self, file_path, remote_filename):
-        """WebDAV con headers de cliente oficial"""
+        """Sube archivo a Nextcloud"""
         try:
-            webdav_url = f"{self.base_url}/remote.php/dav/files/{self.username}/{remote_filename}"
+            self._rotate_user_agent()
+            url = f"{self.base_url}/remote.php/dav/files/{self.username}/{remote_filename}"
             
-            # Headers que usan los clientes oficiales
-            upload_headers = {
-                **self.headers,
+            # Calcular MD5 para header OC-Checksum (como clientes oficiales)
+            file_hash = self._calculate_md5(file_path)
+            
+            headers = {
                 'Content-Type': 'application/octet-stream',
-                'OC-Checksum': self._calculate_md5(file_path),
+                'OC-Checksum': f'MD5:{file_hash}',
             }
             
             with open(file_path, 'rb') as f:
                 response = self.session.put(
-                    webdav_url,
+                    url,
                     auth=(self.username, self.password),
                     data=f,
-                    headers=upload_headers,
+                    headers=headers,
                     timeout=30
                 )
             
             if response.status_code in [201, 204]:
-                return True, f"✅ Subido (WebDAV stealth): {remote_filename}"
+                return True, f"✅ Subido: {remote_filename}"
             else:
-                return False, f"❌ WebDAV {response.status_code}"
+                # Intentar método alternativo sin headers especiales
+                return self._upload_simple(file_path, remote_filename)
                 
         except Exception as e:
-            return False, f"❌ Error WebDAV: {str(e)}"
+            logger.error(f"Error subiendo archivo: {e}")
+            return False, f"❌ Error: {str(e)}"
     
-    def _upload_via_put_direct(self, file_path, remote_filename):
-        """PUT directo con autenticación básica"""
-        try:
-            url = f"{self.base_url}/remote.php/dav/files/{self.username}/{remote_filename}"
-            
-            with open(file_path, 'rb') as f:
-                # Usar requests directamente para más control
-                response = requests.put(
-                    url,
-                    auth=(self.username, self.password),
-                    data=f,
-                    timeout=30,
-                    verify=False,
-                    headers={
-                        'User-Agent': 'Nextcloud-DesktopClient/3.7.4',
-                        'Content-Type': 'application/octet-stream'
-                    }
-                )
-            
-            if response.status_code in [201, 204]:
-                return True, f"✅ Subido (PUT directo): {remote_filename}"
-            else:
-                return False, f"❌ PUT {response.status_code}"
-                
-        except Exception as e:
-            return False, f"❌ Error PUT: {str(e)}"
-    
-    def _upload_via_basic_auth(self, file_path, remote_filename):
-        """Método más básico posible"""
+    def _upload_simple(self, file_path, remote_filename):
+        """Método alternativo más simple"""
         try:
             url = f"{self.base_url}/remote.php/dav/files/{self.username}/{remote_filename}"
             
@@ -244,20 +185,20 @@ class NextcloudStealthClient:
                 )
             
             if response.status_code in [201, 204]:
-                return True, f"✅ Subido (básico): {remote_filename}"
+                return True, f"✅ Subido (método simple): {remote_filename}"
             else:
-                return False, f"❌ Básico {response.status_code}: {response.text[:100]}"
+                return False, f"❌ Error {response.status_code}"
                 
         except Exception as e:
-            return False, f"❌ Error básico: {str(e)}"
+            return False, f"❌ Error simple: {str(e)}"
     
     def _calculate_md5(self, file_path):
-        """Calcula MD5 para header OC-Checksum"""
+        """Calcula MD5 del archivo"""
         hasher = hashlib.md5()
         with open(file_path, 'rb') as f:
             for chunk in iter(lambda: f.read(4096), b''):
                 hasher.update(chunk)
-        return f"MD5:{hasher.hexdigest()}"
+        return hasher.hexdigest()
     
     def get_remote_path(self, filename):
         """Determina ruta remota basado en extensión"""
@@ -283,10 +224,10 @@ class NextcloudStealthClient:
         return f"{folder}/{final_name}"
 
 # ================================
-# INICIALIZACIÓN DEL CLIENTE
+# INICIALIZACIÓN
 # ================================
 print("=" * 60)
-print("🤖 BOT NEXTCLOUD UO - MODO STEALTH")
+print("🤖 BOT NEXTCLOUD UO - VERSIÓN 21.7")
 print("=" * 60)
 print(f"🔗 Servidor: {NEXTCLOUD_URL}")
 print(f"👤 Usuario: {NEXTCLOUD_USER}")
@@ -295,13 +236,12 @@ print("=" * 60)
 
 nc_client = NextcloudStealthClient()
 
-# Probar conexión inicial
-print("\n🔍 Probando conexión como cliente oficial...")
+# Probar conexión
+print("\n🔍 Probando conexión a Nextcloud...")
 success, msg = nc_client.test_connection()
 print(f"📡 {msg}")
 
 if success:
-    # Crear estructura de carpetas
     print("\n📁 Creando estructura de carpetas...")
     folders = [
         '/Telegram_Bot',
@@ -326,13 +266,10 @@ def is_user_allowed(user):
         return False
     return user.username.lower() == ALLOWED_USERNAME
 
-async def check_auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Middleware para verificar autenticación"""
+async def check_auth(update: Update):
+    """Verifica autenticación"""
     user = update.effective_user
     if not is_user_allowed(user):
-        username = user.username if user and user.username else 'Desconocido'
-        logger.warning(f"❌ Acceso denegado a: {username}")
-        
         if update.message:
             await update.message.reply_text(
                 "🚫 *ACCESO DENEGADO*\n\nEste bot es solo para @Eliel_21.",
@@ -342,16 +279,14 @@ async def check_auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
     return True
 
 # ================================
-# MANEJADORES DE TELEGRAM (ASYNC)
+# MANEJADORES DE TELEGRAM
 # ================================
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /start"""
-    if not await check_auth(update, context):
+    if not await check_auth(update):
         return
     
     user = update.effective_user
-    
-    # Probar conexión actual
     success, msg = nc_client.test_connection()
     
     welcome_text = f"""
@@ -364,31 +299,21 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 *Servidor:* `{NEXTCLOUD_URL}`
 *Cuenta:* `{NEXTCLOUD_USER}`
-*Modo:* Stealth (cliente oficial simulado)
 
-*¿Cómo funciona?*
-1. Envíame cualquier archivo
-2. Lo subiré automáticamente a tu Nextcloud UO
-3. Se organizará en carpetas según el tipo
+*Instrucciones:*
+Envía cualquier archivo y lo subiré a tu Nextcloud UO.
 
 *Comandos:*
 /start - Este mensaje
 /status - Verificar conexión
 /test - Probar subida
-
-*📁 Carpetas:*
-• Documentos (PDF, Word, etc.)
-• Imagenes (JPG, PNG, etc.)
-• Audio (MP3, WAV, etc.)
-• Video (MP4, AVI, etc.)
-• Otros (cualquier formato)
     """
     
     await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
 async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /status"""
-    if not await check_auth(update, context):
+    if not await check_auth(update):
         return
     
     success, msg = nc_client.test_connection()
@@ -402,15 +327,14 @@ async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
 • Servidor: `{NEXTCLOUD_URL}`
 • Usuario Nextcloud: `{NEXTCLOUD_USER}`
 • Usuario Telegram: @{update.effective_user.username}
-• Modo: Stealth (cliente oficial)
 • Bot: ✅ Activo
     """
     
     await update.message.reply_text(status_text, parse_mode='Markdown')
 
 async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Comando /test - Prueba de subida"""
-    if not await check_auth(update, context):
+    """Comando /test"""
+    if not await check_auth(update):
         return
     
     await update.message.reply_text("🧪 Creando archivo de prueba...")
@@ -419,8 +343,6 @@ async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     test_content = f"""Archivo de prueba - Bot Nextcloud UO
 Fecha: {datetime.now()}
 Usuario: {NEXTCLOUD_USER}
-Servidor: {NEXTCLOUD_URL}
-Modo: Stealth (cliente oficial simulado)
 """
     
     with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp:
@@ -436,22 +358,19 @@ Modo: Stealth (cliente oficial simulado)
         success, message = nc_client.upload_file(temp_path, remote_path)
         
         if success:
-            result_text = f"""
-✅ *Prueba exitosa!*
-
-{message}
-
-*Puedes verificar en:*
-`{NEXTCLOUD_URL}/apps/files/?dir=/Telegram_Bot/Documentos`
-
-*Ahora puedes enviar archivos reales.*
-            """
-            await update.message.reply_text(result_text, parse_mode='Markdown')
+            await update.message.reply_text(
+                f"✅ *Prueba exitosa!*\n\n{message}\n\n"
+                f"Accede en: {NEXTCLOUD_URL}",
+                parse_mode='Markdown'
+            )
         else:
-            await update.message.reply_text(f"❌ *Prueba fallida*\n\n{message}", parse_mode='Markdown')
+            await update.message.reply_text(
+                f"❌ *Prueba fallida*\n\n{message}",
+                parse_mode='Markdown'
+            )
     
     except Exception as e:
-        await update.message.reply_text(f"❌ Error en prueba: {str(e)[:200]}")
+        await update.message.reply_text(f"❌ Error: {str(e)[:200]}")
     
     finally:
         if os.path.exists(temp_path):
@@ -459,34 +378,33 @@ Modo: Stealth (cliente oficial simulado)
 
 async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja documentos"""
-    if not await check_auth(update, context):
+    if not await check_auth(update):
         return
     
-    await _handle_file(update, context, update.message.document, "📄 Documento")
+    await _handle_file(update, update.message.document, "📄 Documento")
 
 async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja fotos"""
-    if not await check_auth(update, context):
+    if not await check_auth(update):
         return
     
-    # Tomar la foto de mayor calidad (última en la lista)
-    await _handle_file(update, context, update.message.photo[-1], "🖼️ Imagen")
+    await _handle_file(update, update.message.photo[-1], "🖼️ Imagen")
 
 async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja audio"""
-    if not await check_auth(update, context):
+    if not await check_auth(update):
         return
     
-    await _handle_file(update, context, update.message.audio, "🎵 Audio")
+    await _handle_file(update, update.message.audio, "🎵 Audio")
 
 async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja video"""
-    if not await check_auth(update, context):
+    if not await check_auth(update):
         return
     
-    await _handle_file(update, context, update.message.video, "🎬 Video")
+    await _handle_file(update, update.message.video, "🎬 Video")
 
-async def _handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE, file_obj, file_type):
+async def _handle_file(update: Update, file_obj, file_type):
     """Maneja cualquier tipo de archivo"""
     try:
         # Obtener información del archivo
@@ -509,14 +427,10 @@ async def _handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE, file_
         # Descargar archivo
         telegram_file = await file_obj.get_file()
         
-        # Crear archivo temporal
+        # Guardar temporalmente
         with tempfile.NamedTemporaryFile(delete=False, suffix=Path(original_name).suffix or '.bin') as tmp:
             temp_path = tmp.name
             await telegram_file.download_to_drive(temp_path)
-        
-        # Verificar que se descargó
-        if not os.path.exists(temp_path):
-            raise Exception("No se pudo descargar el archivo")
         
         # Actualizar mensaje
         await msg.edit_text(
@@ -547,9 +461,8 @@ async def _handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE, file_
         else:
             await msg.edit_text(
                 f"❌ *Error en la subida*\n\n"
-                f"*Archivo:* {original_name}\n"
-                f"*Error:* {message}\n\n"
-                f"Intenta nuevamente o usa /test",
+                f"Archivo: {original_name}\n"
+                f"Error: {message}",
                 parse_mode='Markdown'
             )
             
@@ -559,7 +472,7 @@ async def _handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE, file_
 
 async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja mensajes desconocidos"""
-    if not await check_auth(update, context):
+    if not await check_auth(update):
         return
     
     await update.message.reply_text(
@@ -572,13 +485,12 @@ async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Maneja errores globales"""
+    """Maneja errores"""
     logger.error(f"Error: {context.error}")
     try:
         if update and update.message:
             await update.message.reply_text(
-                "❌ Ocurrió un error inesperado.\n"
-                "Por favor, intenta nuevamente.",
+                "❌ Ocurrió un error inesperado.",
                 parse_mode='Markdown'
             )
     except:
@@ -588,16 +500,15 @@ async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
 # FUNCIÓN PRINCIPAL
 # ================================
 async def main():
-    """Función principal async"""
+    """Función principal"""
     print("\n🤖 Inicializando bot de Telegram...")
     
-    # Verificar token
-    if not TELEGRAM_TOKEN or TELEGRAM_TOKEN == 'TU_TOKEN_AQUI':
+    if not TELEGRAM_TOKEN:
         print("❌ ERROR: Token de Telegram no configurado")
         return
     
     try:
-        # Crear aplicación (versión 21.x)
+        # Crear aplicación
         application = Application.builder().token(TELEGRAM_TOKEN).build()
         
         # Comandos
@@ -626,19 +537,18 @@ async def main():
         
     except Exception as e:
         print(f"\n❌ Error al iniciar bot: {e}")
-        print("\nPosibles soluciones:")
-        print("1. Verifica que el token sea correcto")
-        print("2. Asegúrate de usar python-telegram-bot==21.7")
-        print("3. El bot ya está ejecutándose en otra instancia")
+        print("\nPosibles causas:")
+        print("1. Token incorrecto")
+        print("2. Bot ya está ejecutándose")
+        print("3. Problemas de red")
 
 # ================================
 # PUNTO DE ENTRADA
 # ================================
 if __name__ == '__main__':
     try:
-        # Ejecutar con asyncio
         asyncio.run(main())
     except KeyboardInterrupt:
         print("\n👋 Bot detenido")
     except Exception as e:
-        print(f"\n❌ Error inesperado: {e}")
+        print(f"\n❌ Error: {e}")
