@@ -1,7 +1,7 @@
 """
 🤖 BOT NEXTCLOUD UO - ERIC SERRANO
-Versión: Python 3.13 compatible
-Modo: Stealth (simula cliente oficial)
+Versión: Python 3.13 + python-telegram-bot 21.7
+Modo: Stealth (cliente oficial)
 Solo para: @Eliel_21
 """
 
@@ -12,54 +12,10 @@ import requests
 import tempfile
 import time
 import random
+import hashlib
 from datetime import datetime
 from pathlib import Path
-
-# ================================
-# PARCHE CRÍTICO PARA PYTHON 3.13 - PRIMERO!
-# ================================
-class FakeImghdr:
-    @staticmethod
-    def what(file_path):
-        """Versión simplificada de imghdr.what para Python 3.13"""
-        try:
-            with open(file_path, 'rb') as f:
-                header = f.read(32)
-            
-            if len(header) < 32:
-                return None
-                
-            # JPEG
-            if header.startswith(b'\xff\xd8\xff'):
-                return 'jpeg'
-            # PNG
-            if header.startswith(b'\x89PNG\r\n\x1a\n'):
-                return 'png'
-            # GIF
-            if header.startswith(b'GIF87a') or header.startswith(b'GIF89a'):
-                return 'gif'
-            # TIFF
-            if header.startswith(b'II\x2a\x00') or header.startswith(b'MM\x00\x2a'):
-                return 'tiff'
-            # BMP
-            if header.startswith(b'BM'):
-                return 'bmp'
-            # WEBP
-            if header.startswith(b'RIFF') and header[8:12] == b'WEBP':
-                return 'webp'
-            
-            return None
-        except:
-            return None
-
-# Reemplazar imghdr antes de que telegram lo importe
-sys.modules['imghdr'] = FakeImghdr()
-
-# ================================
-# IMPORTAR TELEGRAM BOT (después del parche)
-# ================================
-from telegram import Update
-from telegram.ext import Updater, CommandHandler, MessageHandler, Filters, CallbackContext
+import asyncio
 
 # ================================
 # CONFIGURACIÓN PRINCIPAL
@@ -83,6 +39,20 @@ logger = logging.getLogger(__name__)
 # Suprimir warnings SSL
 import urllib3
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
+
+# ================================
+# IMPORTAR TELEGRAM BOT VERSIÓN 21.x
+# ================================
+print("🚀 Cargando Telegram Bot (versión 21.x)...")
+try:
+    from telegram import Update
+    from telegram.ext import Application, CommandHandler, MessageHandler, filters, ContextTypes
+    print("✅ Telegram Bot cargado correctamente")
+except ImportError as e:
+    print(f"❌ Error cargando Telegram Bot: {e}")
+    print("\n⚠️  Instala la versión correcta:")
+    print("pip install python-telegram-bot==21.7")
+    sys.exit(1)
 
 # ================================
 # CLIENTE STEALTH PARA NEXTCLOUD UO
@@ -140,9 +110,9 @@ class NextcloudStealthClient:
             )
             
             if response.status_code == 200:
-                return True, "✅ Conectado como cliente oficial"
+                return True, "✅ Conectado a Nextcloud UO (modo stealth)"
             else:
-                return False, f"❌ Error {response.status_code}: {response.text[:100]}"
+                return False, f"❌ Error {response.status_code}"
                 
         except Exception as e:
             return False, f"❌ Error de conexión: {str(e)}"
@@ -283,7 +253,6 @@ class NextcloudStealthClient:
     
     def _calculate_md5(self, file_path):
         """Calcula MD5 para header OC-Checksum"""
-        import hashlib
         hasher = hashlib.md5()
         with open(file_path, 'rb') as f:
             for chunk in iter(lambda: f.read(4096), b''):
@@ -351,20 +320,33 @@ else:
 # ================================
 # SEGURIDAD - SOLO USUARIO AUTORIZADO
 # ================================
-def is_user_allowed(update: Update):
+def is_user_allowed(user):
     """Verifica si el usuario está autorizado"""
-    user = update.effective_user
     if not user or not user.username:
         return False
     return user.username.lower() == ALLOWED_USERNAME
 
+async def check_auth(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Middleware para verificar autenticación"""
+    user = update.effective_user
+    if not is_user_allowed(user):
+        username = user.username if user and user.username else 'Desconocido'
+        logger.warning(f"❌ Acceso denegado a: {username}")
+        
+        if update.message:
+            await update.message.reply_text(
+                "🚫 *ACCESO DENEGADO*\n\nEste bot es solo para @Eliel_21.",
+                parse_mode='Markdown'
+            )
+        return False
+    return True
+
 # ================================
-# MANEJADORES DE TELEGRAM
+# MANEJADORES DE TELEGRAM (ASYNC)
 # ================================
-def start(update: Update, context: CallbackContext):
+async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /start"""
-    if not is_user_allowed(update):
-        update.message.reply_text("🚫 *ACCESO DENEGADO*\n\nEste bot es solo para @Eliel_21.", parse_mode='Markdown')
+    if not await check_auth(update, context):
         return
     
     user = update.effective_user
@@ -402,11 +384,11 @@ def start(update: Update, context: CallbackContext):
 • Otros (cualquier formato)
     """
     
-    update.message.reply_text(welcome_text, parse_mode='Markdown')
+    await update.message.reply_text(welcome_text, parse_mode='Markdown')
 
-def status(update: Update, context: CallbackContext):
+async def status(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /status"""
-    if not is_user_allowed(update):
+    if not await check_auth(update, context):
         return
     
     success, msg = nc_client.test_connection()
@@ -424,14 +406,14 @@ def status(update: Update, context: CallbackContext):
 • Bot: ✅ Activo
     """
     
-    update.message.reply_text(status_text, parse_mode='Markdown')
+    await update.message.reply_text(status_text, parse_mode='Markdown')
 
-def test(update: Update, context: CallbackContext):
+async def test(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Comando /test - Prueba de subida"""
-    if not is_user_allowed(update):
+    if not await check_auth(update, context):
         return
     
-    update.message.reply_text("🧪 Creando archivo de prueba...")
+    await update.message.reply_text("🧪 Creando archivo de prueba...")
     
     # Crear archivo de prueba
     test_content = f"""Archivo de prueba - Bot Nextcloud UO
@@ -439,8 +421,6 @@ Fecha: {datetime.now()}
 Usuario: {NEXTCLOUD_USER}
 Servidor: {NEXTCLOUD_URL}
 Modo: Stealth (cliente oficial simulado)
-
-Este archivo fue generado por el bot de Telegram.
 """
     
     with tempfile.NamedTemporaryFile(mode='w', delete=False, suffix='.txt', encoding='utf-8') as tmp:
@@ -451,7 +431,7 @@ Este archivo fue generado por el bot de Telegram.
         filename = f"prueba_bot_{datetime.now().strftime('%H%M%S')}.txt"
         remote_path = nc_client.get_remote_path(filename)
         
-        update.message.reply_text("📤 Subiendo archivo de prueba...")
+        await update.message.reply_text("📤 Subiendo archivo de prueba...")
         
         success, message = nc_client.upload_file(temp_path, remote_path)
         
@@ -466,47 +446,47 @@ Este archivo fue generado por el bot de Telegram.
 
 *Ahora puedes enviar archivos reales.*
             """
-            update.message.reply_text(result_text, parse_mode='Markdown')
+            await update.message.reply_text(result_text, parse_mode='Markdown')
         else:
-            update.message.reply_text(f"❌ *Prueba fallida*\n\n{message}", parse_mode='Markdown')
+            await update.message.reply_text(f"❌ *Prueba fallida*\n\n{message}", parse_mode='Markdown')
     
     except Exception as e:
-        update.message.reply_text(f"❌ Error en prueba: {str(e)[:200]}")
+        await update.message.reply_text(f"❌ Error en prueba: {str(e)[:200]}")
     
     finally:
         if os.path.exists(temp_path):
             os.unlink(temp_path)
 
-def handle_document(update: Update, context: CallbackContext):
+async def handle_document(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja documentos"""
-    if not is_user_allowed(update):
+    if not await check_auth(update, context):
         return
     
-    _handle_file(update, context, update.message.document, "📄 Documento")
+    await _handle_file(update, context, update.message.document, "📄 Documento")
 
-def handle_photo(update: Update, context: CallbackContext):
+async def handle_photo(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja fotos"""
-    if not is_user_allowed(update):
+    if not await check_auth(update, context):
         return
     
     # Tomar la foto de mayor calidad (última en la lista)
-    _handle_file(update, context, update.message.photo[-1], "🖼️ Imagen")
+    await _handle_file(update, context, update.message.photo[-1], "🖼️ Imagen")
 
-def handle_audio(update: Update, context: CallbackContext):
+async def handle_audio(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja audio"""
-    if not is_user_allowed(update):
+    if not await check_auth(update, context):
         return
     
-    _handle_file(update, context, update.message.audio, "🎵 Audio")
+    await _handle_file(update, context, update.message.audio, "🎵 Audio")
 
-def handle_video(update: Update, context: CallbackContext):
+async def handle_video(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja video"""
-    if not is_user_allowed(update):
+    if not await check_auth(update, context):
         return
     
-    _handle_file(update, context, update.message.video, "🎬 Video")
+    await _handle_file(update, context, update.message.video, "🎬 Video")
 
-def _handle_file(update: Update, context: CallbackContext, file_obj, file_type):
+async def _handle_file(update: Update, context: ContextTypes.DEFAULT_TYPE, file_obj, file_type):
     """Maneja cualquier tipo de archivo"""
     try:
         # Obtener información del archivo
@@ -519,7 +499,7 @@ def _handle_file(update: Update, context: CallbackContext, file_obj, file_type):
         file_size_mb = file_size / (1024 * 1024)
         
         # Mensaje inicial
-        msg = update.message.reply_text(
+        msg = await update.message.reply_text(
             f"{file_type}: *{original_name}*\n"
             f"📏 Tamaño: {file_size_mb:.2f} MB\n"
             f"⏳ Descargando...",
@@ -527,25 +507,22 @@ def _handle_file(update: Update, context: CallbackContext, file_obj, file_type):
         )
         
         # Descargar archivo
-        file = file_obj.get_file()
+        telegram_file = await file_obj.get_file()
         
         # Crear archivo temporal
-        temp_dir = tempfile.gettempdir()
-        file_ext = Path(original_name).suffix or '.bin'
-        temp_filename = f"nc_{file_obj.file_id}{file_ext}"
-        temp_path = os.path.join(temp_dir, temp_filename)
-        
-        file.download(custom_path=temp_path)
+        with tempfile.NamedTemporaryFile(delete=False, suffix=Path(original_name).suffix or '.bin') as tmp:
+            temp_path = tmp.name
+            await telegram_file.download_to_drive(temp_path)
         
         # Verificar que se descargó
         if not os.path.exists(temp_path):
             raise Exception("No se pudo descargar el archivo")
         
         # Actualizar mensaje
-        context.bot.edit_message_text(
-            chat_id=update.effective_chat.id,
-            message_id=msg.message_id,
-            text=f"{file_type}: *{original_name}*\n✅ Descargado\n📤 Subiendo a Nextcloud UO...",
+        await msg.edit_text(
+            f"{file_type}: *{original_name}*\n"
+            f"✅ Descargado\n"
+            f"📤 Subiendo a Nextcloud UO...",
             parse_mode='Markdown'
         )
         
@@ -561,30 +538,31 @@ def _handle_file(update: Update, context: CallbackContext, file_obj, file_type):
         
         # Resultado final
         if success:
-            context.bot.edit_message_text(
-                chat_id=update.effective_chat.id,
-                message_id=msg.message_id,
-                text=f"✅ *Subida exitosa!*\n\n{message}\n\nAccede en: {NEXTCLOUD_URL}",
+            await msg.edit_text(
+                f"✅ *Subida exitosa!*\n\n"
+                f"{message}\n\n"
+                f"*Accede en:* {NEXTCLOUD_URL}",
                 parse_mode='Markdown'
             )
         else:
-            context.bot.edit_message_text(
-                chat_id=update.effective_chat.id,
-                message_id=msg.message_id,
-                text=f"❌ *Error en la subida*\n\nArchivo: {original_name}\nError: {message}\n\nIntenta nuevamente o usa /test",
+            await msg.edit_text(
+                f"❌ *Error en la subida*\n\n"
+                f"*Archivo:* {original_name}\n"
+                f"*Error:* {message}\n\n"
+                f"Intenta nuevamente o usa /test",
                 parse_mode='Markdown'
             )
             
     except Exception as e:
         logger.error(f"Error procesando archivo: {e}")
-        update.message.reply_text(f"❌ Error: {str(e)[:200]}")
+        await update.message.reply_text(f"❌ Error: {str(e)[:200]}")
 
-def unknown(update: Update, context: CallbackContext):
+async def unknown(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Maneja mensajes desconocidos"""
-    if not is_user_allowed(update):
+    if not await check_auth(update, context):
         return
     
-    update.message.reply_text(
+    await update.message.reply_text(
         "🤔 No entiendo ese comando.\n\n"
         "Envía un archivo o usa:\n"
         "/start - Inicio\n"
@@ -593,50 +571,64 @@ def unknown(update: Update, context: CallbackContext):
         parse_mode='Markdown'
     )
 
+async def error_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Maneja errores globales"""
+    logger.error(f"Error: {context.error}")
+    try:
+        if update and update.message:
+            await update.message.reply_text(
+                "❌ Ocurrió un error inesperado.\n"
+                "Por favor, intenta nuevamente.",
+                parse_mode='Markdown'
+            )
+    except:
+        pass
+
 # ================================
 # FUNCIÓN PRINCIPAL
 # ================================
-def main():
-    """Función principal"""
+async def main():
+    """Función principal async"""
     print("\n🤖 Inicializando bot de Telegram...")
     
     # Verificar token
-    if not TELEGRAM_TOKEN:
+    if not TELEGRAM_TOKEN or TELEGRAM_TOKEN == 'TU_TOKEN_AQUI':
         print("❌ ERROR: Token de Telegram no configurado")
         return
     
     try:
-        # Crear updater
-        updater = Updater(token=TELEGRAM_TOKEN, use_context=True)
-        dispatcher = updater.dispatcher
+        # Crear aplicación (versión 21.x)
+        application = Application.builder().token(TELEGRAM_TOKEN).build()
         
         # Comandos
-        dispatcher.add_handler(CommandHandler("start", start))
-        dispatcher.add_handler(CommandHandler("status", status))
-        dispatcher.add_handler(CommandHandler("test", test))
+        application.add_handler(CommandHandler("start", start))
+        application.add_handler(CommandHandler("status", status))
+        application.add_handler(CommandHandler("test", test))
         
         # Handlers de archivos
-        dispatcher.add_handler(MessageHandler(Filters.document, handle_document))
-        dispatcher.add_handler(MessageHandler(Filters.photo, handle_photo))
-        dispatcher.add_handler(MessageHandler(Filters.audio, handle_audio))
-        dispatcher.add_handler(MessageHandler(Filters.video, handle_video))
+        application.add_handler(MessageHandler(filters.Document.ALL, handle_document))
+        application.add_handler(MessageHandler(filters.PHOTO, handle_photo))
+        application.add_handler(MessageHandler(filters.AUDIO, handle_audio))
+        application.add_handler(MessageHandler(filters.VIDEO, handle_video))
         
         # Handler por defecto
-        dispatcher.add_handler(MessageHandler(Filters.text & ~Filters.command, unknown))
+        application.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, unknown))
+        
+        # Error handler
+        application.add_error_handler(error_handler)
         
         print("✅ Bot configurado correctamente")
         print("📱 Busca tu bot en Telegram y envía /start")
         print("\n" + "=" * 60)
         
         # Iniciar bot
-        updater.start_polling()
-        updater.idle()
+        await application.run_polling()
         
     except Exception as e:
         print(f"\n❌ Error al iniciar bot: {e}")
         print("\nPosibles soluciones:")
         print("1. Verifica que el token sea correcto")
-        print("2. Asegúrate de usar python-telegram-bot==13.15")
+        print("2. Asegúrate de usar python-telegram-bot==21.7")
         print("3. El bot ya está ejecutándose en otra instancia")
 
 # ================================
@@ -644,7 +636,8 @@ def main():
 # ================================
 if __name__ == '__main__':
     try:
-        main()
+        # Ejecutar con asyncio
+        asyncio.run(main())
     except KeyboardInterrupt:
         print("\n👋 Bot detenido")
     except Exception as e:
