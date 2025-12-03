@@ -19,7 +19,7 @@ NEXTCLOUD_USER = "Claudia.btabares@estudiantes.instec.uh.cu"
 NEXTCLOUD_PASS = "cbt260706*TM"
 UPLOAD_FOLDER = "TelegramBot/"
 
-TELEGRAM_BOT_TOKEN = "8557318531:AAEGDyrBiYyL06_H5y4WiMj6jzL7jMLdKq0"
+TELEGRAM_BOT_TOKEN = "8454582976:AAHc6XV-n7SctCfz8KdGnZKrM0JYsEQudfc"
 
 logging.basicConfig(
     level=logging.INFO,
