@@ -22,7 +22,7 @@ NEXTCLOUD_CONFIG = {
 }
 
 # CONFIGURACIÓN TELEGRAM
-TELEGRAM_BOT_TOKEN = "8503832757:AAHJ7cuRJnu-cYtA_87Mwyu9RgHtbHLW0_k"  # Token real de @BotFather
+TELEGRAM_BOT_TOKEN = "8546855140:AAHeX8ZGBNL4p4Au_jviLkFtypBKk5fWHS0"  # Token real de @BotFather
 
 # Configurar logging
 logging.basicConfig(
