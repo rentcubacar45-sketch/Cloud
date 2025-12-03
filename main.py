@@ -1,4 +1,4 @@
-# main.py - VERSIÓN CORREGIDA CON HTML VÁLIDO
+# main.py - VERSIÓN CON DIAGNÓSTICO
 import os
 import requests
 import telebot
@@ -6,7 +6,6 @@ import logging
 from pathlib import Path
 from urllib.parse import urljoin, quote
 from typing import Tuple, Optional
-import html
 import time
 
 # ============================================
@@ -20,383 +19,347 @@ NEXTCLOUD_CONFIG = {
     "upload_base": "TelegramBot/"
 }
 
-TELEGRAM_BOT_TOKEN = "8552220063:AAFyI7DddpOF8y3HYX_G1ka63IskWH660Fo"
+TELEGRAM_BOT_TOKEN = "8461093571:AAG2gKIKd1hanVqsDIc5PNcpl2JAeSSCgmU"
 
-# Configurar logging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(levelname)s - %(message)s'
-)
+logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
 # ============================================
-# FUNCIÓN PARA HTML VÁLIDO EN TELEGRAM
+# DIAGNÓSTICO DE CONEXIÓN NEXTCLOUD
 # ============================================
 
-def format_html_safe(text):
-    """
-    Formatea texto para HTML de Telegram de forma segura.
-    Telegram solo acepta: <b>, <i>, <u>, <s>, <a>, <code>, <pre>
-    NO acepta: <br>, <p>, <div>, etc.
-    """
-    if text is None:
-        return ""
+def test_nextcloud_connection():
+    """Prueba diferentes métodos de conexión a NextCloud"""
+    base_url = NEXTCLOUD_CONFIG["base_url"]
+    username = NEXTCLOUD_CONFIG["username"]
+    password = NEXTCLOUD_CONFIG["password"]
     
-    # 1. Escapar HTML
-    text = html.escape(str(text))
+    print("\n" + "="*50)
+    print("DIAGNÓSTICO NEXTCLOUD")
+    print("="*50)
     
-    # 2. Reemplazar saltos de línea por \n (NO usar <br>)
-    text = text.replace('\n', '\n')
+    session = requests.Session()
+    session.auth = (username, password)
     
-    # 3. Limpiar tags no permitidos
-    # Telegram solo permite estos tags: <b>, <i>, <u>, <s>, <a>, <code>, <pre>
-    return text
-
-def send_html_message(bot, chat_id, text, reply_to_message_id=None):
-    """Envía mensaje con HTML válido para Telegram"""
-    safe_text = format_html_safe(text)
-    bot.send_message(
-        chat_id,
-        safe_text,
-        parse_mode='HTML',
-        reply_to_message_id=reply_to_message_id
-    )
+    # Probar diferentes endpoints
+    endpoints = [
+        "status.php",
+        "index.php",
+        "apps/files/",
+        "remote.php/dav/",
+        "ocs/v1.php/cloud/capabilities"
+    ]
+    
+    for endpoint in endpoints:
+        url = urljoin(base_url, endpoint)
+        try:
+            response = session.get(url, timeout=10)
+            print(f"{endpoint:30} → Status: {response.status_code} | Size: {len(response.text)} chars")
+            if response.status_code == 200:
+                print(f"   Contenido: {response.text[:100]}...")
+        except Exception as e:
+            print(f"{endpoint:30} → Error: {e}")
+    
+    print("\n" + "="*50)
+    print("PRUEBAS DE AUTENTICACIÓN")
+    print("="*50)
+    
+    # Probar métodos de autenticación
+    methods = [
+        ("Basic Auth", session),
+        ("Sin Auth", requests.Session()),
+        ("Con User-Agent", requests.Session()),
+    ]
+    
+    for method_name, test_session in methods:
+        if method_name == "Con User-Agent":
+            test_session.headers.update({
+                'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+            })
+            test_session.auth = (username, password)
+        
+        url = urljoin(base_url, "status.php")
+        try:
+            response = test_session.get(url, timeout=10)
+            print(f"{method_name:20} → Status: {response.status_code}")
+        except Exception as e:
+            print(f"{method_name:20} → Error: {e}")
+    
+    # Probar URL de login
+    print("\n" + "="*50)
+    print("PRUEBA DE LOGIN WEB")
+    print("="*50)
+    
+    login_url = urljoin(base_url, "index.php/login")
+    try:
+        response = session.get(login_url, timeout=10)
+        print(f"Login page: {response.status_code}")
+        if "nextcloud" in response.text.lower():
+            print("✓ Página de NextCloud detectada")
+        else:
+            print("✗ No parece ser NextCloud")
+            print(f"Título: {response.text[:200]}...")
+    except Exception as e:
+        print(f"Error login: {e}")
 
 # ============================================
-# CLASE NEXTCLOUD CON WEBDAV
+# CLASE NEXTCLOUD MEJORADA
 # ============================================
 
 class NextCloudCubaClient:
-    """Cliente especializado para NextCloud desde Cuba usando WebDAV"""
+    """Cliente mejorado con múltiples estrategias"""
     
     def __init__(self, base_url: str, username: str, password: str):
         self.base_url = base_url.rstrip('/') + '/'
         self.username = username
         self.password = password
-        
         self.session = requests.Session()
+        
+        # Estrategia 1: Headers normales
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows) mirall/3.4.1',
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
             'Accept': 'application/json, text/plain, */*',
             'Accept-Language': 'es, en-US;q=0.7, en;q=0.3',
-            'Connection': 'keep-alive',
-            'DNT': '1',
-            'Origin': self.base_url,
-            'Referer': self.base_url,
-            'Sec-Fetch-Dest': 'empty',
-            'Sec-Fetch-Mode': 'cors',
-            'Sec-Fetch-Site': 'same-origin',
         })
         
-        self.session.auth = (username, password)
-        self._verify_connection()
+        # Probar diferentes métodos de autenticación
+        self._find_working_auth()
     
-    def _verify_connection(self):
-        """Verificar que podemos conectar a NextCloud"""
-        try:
-            status_url = urljoin(self.base_url, 'status.php')
-            response = self.session.get(status_url, timeout=15)
-            
-            if response.status_code == 200:
-                data = response.json()
-                logger.info(f"✅ Conectado a NextCloud {data.get('productname', '')} v{data.get('version', '')}")
+    def _find_working_auth(self):
+        """Encuentra el método de autenticación que funcione"""
+        methods = [
+            self._try_basic_auth,
+            self._try_session_login,
+            self._try_cookie_login,
+        ]
+        
+        for method in methods:
+            if method():
+                logger.info(f"✓ Autenticación exitosa con {method.__name__}")
                 return True
-            elif response.status_code == 403:
-                logger.warning("⚠️  Acceso denegado. Verifica credenciales.")
-                return False
-            else:
-                logger.warning(f"⚠️  Respuesta inesperada: {response.status_code}")
-                return False
-                
-        except Exception as e:
-            logger.error(f"❌ Error de conexión: {e}")
+        
+        logger.error("✗ No se pudo autenticar con ningún método")
+        return False
+    
+    def _try_basic_auth(self):
+        """Intentar autenticación básica"""
+        self.session.auth = (self.username, self.password)
+        try:
+            response = self.session.get(urljoin(self.base_url, "status.php"), timeout=10)
+            return response.status_code == 200
+        except:
             return False
     
-    def upload_via_webdav(self, file_path: Path, remote_path: str = "") -> Tuple[bool, str]:
-        """
-        Subir archivo via WebDAV
-        """
+    def _try_session_login(self):
+        """Intentar login por sesión (simular navegador)"""
+        try:
+            # Primero obtener la página de login
+            login_url = urljoin(self.base_url, "index.php/login")
+            response = self.session.get(login_url, timeout=10)
+            
+            # Extraer token CSRF si existe
+            import re
+            csrf_match = re.search(r'name="requesttoken" value="([^"]+)"', response.text)
+            csrf_token = csrf_match.group(1) if csrf_match else ""
+            
+            # Enviar credenciales
+            login_data = {
+                'user': self.username,
+                'password': self.password,
+                'timezone-offset': '0',
+                'requesttoken': csrf_token,
+            }
+            
+            login_response = self.session.post(login_url, data=login_data, timeout=10)
+            return "location" in login_response.headers or login_response.status_code == 200
+            
+        except Exception as e:
+            logger.error(f"Error en login por sesión: {e}")
+            return False
+    
+    def _try_cookie_login(self):
+        """Intentar con cookies de sesión existente"""
+        # Este método requiere que primero inicies sesión manualmente en navegador
+        # y extraigas las cookies
+        return False
+    
+    def upload_file(self, file_path: Path, remote_path: str = "") -> Tuple[bool, str]:
+        """Subir archivo con múltiples métodos"""
+        methods = [
+            self._upload_webdav,
+            self._upload_ocs,
+            self._upload_public,
+        ]
+        
+        for method in methods:
+            logger.info(f"Intentando método: {method.__name__}")
+            success, result = method(file_path, remote_path)
+            if success:
+                return True, result
+        
+        return False, "Todos los métodos de subida fallaron"
+    
+    def _upload_webdav(self, file_path: Path, remote_path: str = "") -> Tuple[bool, str]:
+        """Método WebDAV"""
         try:
             if not file_path.exists():
-                return False, f"Archivo no existe: {file_path}"
+                return False, "Archivo no existe"
             
             file_name = file_path.name
-            file_size = file_path.stat().st_size
-            
             webdav_url = f"{self.base_url}remote.php/dav/files/{self.username}/"
             
             if remote_path:
-                remote_path = remote_path.strip('/') + '/'
-                webdav_url += remote_path
+                webdav_url += remote_path.strip('/') + '/'
             
-            encoded_filename = quote(file_name)
-            webdav_url += encoded_filename
-            
-            headers = {
-                'Content-Type': 'application/octet-stream',
-                'Content-Length': str(file_size),
-                'X-Requested-With': 'XMLHttpRequest',
-            }
-            
-            logger.info(f"📤 Subiendo {file_name} ({file_size:,} bytes) a WebDAV...")
+            webdav_url += quote(file_name)
             
             with open(file_path, 'rb') as f:
                 response = self.session.put(
                     webdav_url,
                     data=f,
-                    headers=headers,
+                    headers={'Content-Type': 'application/octet-stream'},
                     timeout=30
                 )
             
             if response.status_code in [201, 204]:
-                share_url = self._create_share(remote_path + file_name if remote_path else file_name)
-                logger.info(f"✅ Subido exitosamente: {file_name}")
-                result_msg = f"Subido: {file_name}"
-                if share_url:
-                    result_msg += f"\nURL: {share_url}"
-                return True, result_msg
+                return True, f"WebDAV: {file_name}"
             else:
-                logger.error(f"❌ Error WebDAV {response.status_code}: {response.text[:200]}")
-                return False, f"Error {response.status_code}: {response.text[:100]}"
+                return False, f"WebDAV Error {response.status_code}"
                 
         except Exception as e:
-            logger.error(f"❌ Error en upload_via_webdav: {e}")
-            return False, f"Error: {str(e)}"
+            return False, f"WebDAV Exception: {str(e)}"
     
-    def _create_share(self, file_path: str) -> Optional[str]:
-        """Crear un enlace público para el archivo"""
+    def _upload_ocs(self, file_path: Path, remote_path: str = "") -> Tuple[bool, str]:
+        """Método OCS API"""
         try:
-            share_url = f"{self.base_url}ocs/v2.php/apps/files_sharing/api/v1/shares"
+            file_name = file_path.name
+            upload_url = f"{self.base_url}ocs/v2.php/apps/files/api/v1/files"
             
-            data = {
-                'path': file_path,
-                'shareType': 3,
-                'permissions': 1
-            }
-            
-            headers = {
-                'OCS-APIRequest': 'true',
-                'Content-Type': 'application/x-www-form-urlencoded'
-            }
-            
-            response = self.session.post(share_url, data=data, headers=headers)
+            with open(file_path, 'rb') as f:
+                files = {'file': (file_name, f)}
+                headers = {'OCS-APIRequest': 'true'}
+                
+                response = self.session.post(
+                    upload_url,
+                    files=files,
+                    headers=headers,
+                    timeout=30
+                )
             
             if response.status_code == 200:
-                import xml.etree.ElementTree as ET
-                root = ET.fromstring(response.content)
-                url_element = root.find('.{http://owncloud.org/ns}url')
-                if url_element is not None:
-                    return url_element.text
-            
-            return None
-            
-        except:
-            return None
-
-# ============================================
-# BOT DE TELEGRAM CON HTML VÁLIDO
-# ============================================
-
-class TelegramNextCloudBot:
-    """Bot de Telegram que maneja subidas a NextCloud usando HTML válido"""
-    
-    def __init__(self, token: str, nextcloud_client: NextCloudCubaClient):
-        self.bot = telebot.TeleBot(token)
-        self.nc_client = nextcloud_client
-        
-        # Configurar handlers
-        self._setup_handlers()
-        logger.info("🤖 Bot de Telegram inicializado")
-    
-    def _send_simple_message(self, chat_id, text, reply_to_message_id=None):
-        """Envía mensaje simple sin formato complejo"""
-        try:
-            self.bot.send_message(
-                chat_id,
-                text,
-                reply_to_message_id=reply_to_message_id
-            )
+                return True, f"OCS: {file_name}"
+            else:
+                return False, f"OCS Error {response.status_code}"
+                
         except Exception as e:
-            # Si falla, intentar sin formato
-            logger.error(f"Error enviando mensaje: {e}")
-            try:
-                self.bot.send_message(
-                    chat_id,
-                    "✅ Operación completada",
-                    reply_to_message_id=reply_to_message_id
+            return False, f"OCS Exception: {str(e)}"
+    
+    def _upload_public(self, file_path: Path, remote_path: str = "") -> Tuple[bool, str]:
+        """Método para uploads públicos (si está habilitado)"""
+        try:
+            # Primero obtener un link de upload público
+            share_url = f"{self.base_url}ocs/v2.php/apps/files_sharing/api/v1/shares"
+            data = {
+                'path': remote_path if remote_path else '/',
+                'shareType': 3,
+                'permissions': 1,
+                'publicUpload': True
+            }
+            
+            response = self.session.post(share_url, data=data, timeout=10)
+            if response.status_code != 200:
+                return False, "No se pudo crear upload público"
+            
+            # Parsear respuesta XML para obtener token
+            import xml.etree.ElementTree as ET
+            root = ET.fromstring(response.content)
+            token_element = root.find('.{http://owncloud.org/ns}token')
+            
+            if token_element is None:
+                return False, "No token en respuesta"
+            
+            token = token_element.text
+            upload_url = f"{self.base_url}public.php/webdav/{token}/"
+            
+            # Subir archivo
+            with open(file_path, 'rb') as f:
+                put_response = self.session.put(
+                    upload_url + file_path.name,
+                    data=f,
+                    timeout=30
                 )
-            except:
-                pass
+            
+            if put_response.status_code in [201, 204]:
+                return True, f"Público: {file_path.name}"
+            else:
+                return False, f"Público Error {put_response.status_code}"
+                
+        except Exception as e:
+            return False, f"Público Exception: {str(e)}"
+
+# ============================================
+# BOT SIMPLIFICADO (Mientras resolvemos NextCloud)
+# ============================================
+
+class SimpleTelegramBot:
+    """Bot simple mientras resolvemos NextCloud"""
+    
+    def __init__(self, token: str):
+        self.bot = telebot.TeleBot(token)
+        self._setup_handlers()
+        logger.info("🤖 Bot simple inicializado")
     
     def _setup_handlers(self):
-        """Configurar comandos del bot"""
-        
         @self.bot.message_handler(commands=['start', 'help'])
         def send_welcome(message):
-            welcome_text = """📁 <b>Bot de Subida a NextCloud</b>
-
-<b>Comandos disponibles:</b>
-/start, /help - Muestra este mensaje
-/upload - Instrucciones para subir archivos
-/status - Verifica conexión con NextCloud
-
-<b>Para subir archivos:</b>
-Envía cualquier archivo (documento, imagen, video, etc.)
-
-<b>Carpeta de destino:</b> TelegramBot/"""
-            try:
-                self.bot.reply_to(message, welcome_text, parse_mode='HTML')
-            except:
-                # Fallback simple
-                simple_text = """📁 Bot de Subida a NextCloud
-
-Comandos:
-/start, /help - Ayuda
-/upload - Instrucciones
-/status - Ver estado
-
-Envía un archivo para subirlo a TelegramBot/"""
-                self.bot.reply_to(message, simple_text)
+            self.bot.reply_to(message, "Bot en diagnóstico. Usa /test para probar NextCloud")
         
-        @self.bot.message_handler(commands=['status'])
-        def check_status(message):
-            self.bot.reply_to(message, "🔍 Verificando conexión...")
-            self.bot.reply_to(message, "✅ Bot operativo")
-        
-        @self.bot.message_handler(commands=['upload'])
-        def upload_instructions(message):
-            instructions = """📤 <b>Instrucciones para subir:</b>
-
-1. Envía el archivo al bot
-2. Tamaño máximo: 2GB
-3. Formatos: Todos
-
-Se guardará en: TelegramBot/
-
-Nota: Archivos grandes pueden tardar"""
-            try:
-                self.bot.reply_to(message, instructions, parse_mode='HTML')
-            except:
-                self.bot.reply_to(message, "Envía archivos directamente al bot. Se subirán a TelegramBot/")
-        
-        @self.bot.message_handler(content_types=['document', 'photo', 'video', 'audio'])
-        def handle_file(message):
-            """Manejar archivos subidos"""
-            try:
-                # Responder inmediatamente
-                self.bot.reply_to(message, "⏳ Descargando archivo...")
-                
-                # Obtener información del archivo
-                file_info = None
-                file_name = ""
-                
-                if message.document:
-                    file_info = self.bot.get_file(message.document.file_id)
-                    file_name = message.document.file_name or f"document_{message.message_id}"
-                elif message.photo:
-                    file_info = self.bot.get_file(message.photo[-1].file_id)
-                    file_name = f"photo_{message.message_id}.jpg"
-                elif message.video:
-                    file_info = self.bot.get_file(message.video.file_id)
-                    file_name = message.video.file_name or f"video_{message.message_id}.mp4"
-                elif message.audio:
-                    file_info = self.bot.get_file(message.audio.file_id)
-                    file_name = message.audio.file_name or f"audio_{message.message_id}.mp3"
-                else:
-                    self.bot.reply_to(message, "❌ Tipo no soportado")
-                    return
-                
-                # Descargar archivo
-                downloaded_file = self.bot.download_file(file_info.file_path)
-                
-                # Guardar temporalmente
-                local_path = Path(f"temp_{file_name}")
-                with open(local_path, 'wb') as f:
-                    f.write(downloaded_file)
-                
-                # Subir a NextCloud
-                self.bot.reply_to(message, f"📤 Subiendo {file_name}...")
-                
-                success, result = self.nc_client.upload_via_webdav(
-                    local_path,
-                    NEXTCLOUD_CONFIG["upload_base"]
-                )
-                
-                # Limpiar archivo temporal
-                if local_path.exists():
-                    local_path.unlink()
-                
-                if success:
-                    # Mensaje simple de éxito
-                    success_msg = f"✅ Subida exitosa\n\n{result}"
-                    if len(success_msg) > 4000:
-                        success_msg = success_msg[:4000] + "\n..."
-                    self.bot.reply_to(message, success_msg)
-                else:
-                    error_msg = f"❌ Error en subida\n\n{result}"
-                    self.bot.reply_to(message, error_msg)
-                        
-            except Exception as e:
-                logger.error(f"Error en handle_file: {e}")
-                self.bot.reply_to(message, f"❌ Error: {str(e)[:100]}")
+        @self.bot.message_handler(commands=['test'])
+        def test_connection(message):
+            self.bot.reply_to(message, "Ejecutando diagnóstico de NextCloud...")
+            # Ejecutar diagnóstico
+            import io
+            import sys
+            
+            old_stdout = sys.stdout
+            sys.stdout = buffer = io.StringIO()
+            
+            test_nextcloud_connection()
+            
+            sys.stdout = old_stdout
+            result = buffer.getvalue()
+            
+            # Enviar resultado en chunks
+            for i in range(0, len(result), 4000):
+                self.bot.reply_to(message, result[i:i+4000])
         
         @self.bot.message_handler(func=lambda message: True)
         def echo_all(message):
-            self.bot.reply_to(message, "📁 Envía un archivo para subirlo a NextCloud\nUsa /help para ayuda")
-    
-    def run(self):
-        """Iniciar el bot"""
-        logger.info("🚀 Iniciando bot de Telegram...")
-        # Limpiar webhook previo
-        self.bot.remove_webhook()
-        time.sleep(1)
-        # Iniciar polling
-        self.bot.infinity_polling(timeout=30, long_polling_timeout=30, skip_pending=True)
+            self.bot.reply_to(message, "⚠️ NextCloud no configurado. Usa /test para diagnóstico")
 
 # ============================================
-# FUNCIÓN PRINCIPAL
+# MAIN
 # ============================================
 
 def main():
-    """Función principal"""
-    logger.info("⚡ Iniciando sistema de subida NextCloud")
+    print("\n" + "="*60)
+    print("NEXTCLOUD TELEGRAM BOT - DIAGNÓSTICO")
+    print("="*60)
+    
+    # Ejecutar diagnóstico primero
+    test_nextcloud_connection()
+    
+    # Iniciar bot
+    bot = SimpleTelegramBot(TELEGRAM_BOT_TOKEN)
+    
+    print("\n" + "="*60)
+    print("INICIANDO BOT...")
+    print("="*60)
     
     try:
-        # 1. Inicializar cliente NextCloud
-        logger.info("🔗 Conectando a NextCloud...")
-        nc_client = NextCloudCubaClient(
-            base_url=NEXTCLOUD_CONFIG["base_url"],
-            username=NEXTCLOUD_CONFIG["username"],
-            password=NEXTCLOUD_CONFIG["password"]
-        )
-        
-        # 2. Inicializar bot de Telegram
-        logger.info("🤖 Inicializando bot de Telegram...")
-        bot = TelegramNextCloudBot(
-            token=TELEGRAM_BOT_TOKEN,
-            nextcloud_client=nc_client
-        )
-        
-        # 3. Iniciar bot
-        bot.run()
-        
+        bot.bot.infinity_polling(timeout=30, skip_pending=True)
     except KeyboardInterrupt:
-        logger.info("👋 Bot detenido por el usuario")
-    except Exception as e:
-        logger.error(f"💥 Error fatal: {e}")
-        raise
-
-# ============================================
-# EJECUCIÓN
-# ============================================
+        print("\n👋 Bot detenido")
 
 if __name__ == "__main__":
-    print("""
-    📁 NEXTCLOUD UPLOAD BOT
-    ======================
-    
-    Iniciando bot...
-    """)
-    
-    # Ejecutar bot
     main()
