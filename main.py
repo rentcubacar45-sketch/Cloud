@@ -20,7 +20,7 @@ NEXTCLOUD_CONFIG = {
     "upload_base": "TelegramBot/"
 }
 
-TELEGRAM_BOT_TOKEN = "8546855140:AAHeX8ZGBNL4p4Au_jviLkFtypBKk5fWHS0"
+TELEGRAM_BOT_TOKEN = "8304435608:AAE35KFOYCcWlth8_8CE1osHfhvQyoFYpb4"
 
 # Configurar logging
 logging.basicConfig(
