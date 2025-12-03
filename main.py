@@ -1,4 +1,4 @@
-# main.py - VERSIÓN CORREGIDA PARA RENDER
+# main.py - VERSIÓN CORREGIDA CON HTML
 import os
 import requests
 import telebot
@@ -6,23 +6,21 @@ import logging
 from pathlib import Path
 from urllib.parse import urljoin, quote
 from typing import Tuple, Optional
-
-# ... resto de tu código ...
+import html
+import time
 
 # ============================================
-# CONFIGURACIÓN - REEMPLAZA CON TUS DATOS
+# CONFIGURACIÓN
 # ============================================
 
-# CONFIGURACIÓN DE NEXTCLOUD (EJEMPLO)
 NEXTCLOUD_CONFIG = {
-    "base_url": "https://minube.uh.cu/",  # Sin /index.php
+    "base_url": "https://minube.uh.cu/",
     "username": "Claudia.btabares@estudiantes.instec.uh.cu",
-    "password": "cbt260706*TM",  # CRUCIAL: Usa App Password desde Ajustes
-    "upload_base": "TelegramBot/"  # Carpeta base dentro de tus archivos
+    "password": "cbt260706*TM",
+    "upload_base": "TelegramBot/"
 }
 
-# CONFIGURACIÓN TELEGRAM
-TELEGRAM_BOT_TOKEN = "8546855140:AAHeX8ZGBNL4p4Au_jviLkFtypBKk5fWHS0"  # Token real de @BotFather
+TELEGRAM_BOT_TOKEN = "8546855140:AAHeX8ZGBNL4p4Au_jviLkFtypBKk5fWHS0"
 
 # Configurar logging
 logging.basicConfig(
@@ -32,30 +30,33 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ============================================
-# CLASE NEXTCLOUD CON WEBDAV (MÉTODO MÁS FIABLE)
+# FUNCIÓN PARA ESCAPAR HTML
+# ============================================
+
+def escape_html_safe(text):
+    """Escapa caracteres HTML de forma segura"""
+    if text is None:
+        return ""
+    return html.escape(str(text))
+
+def format_html_message(title, content=""):
+    """Formatea un mensaje HTML seguro"""
+    safe_content = escape_html_safe(content).replace('\n', '<br>')
+    return f"<b>{escape_html_safe(title)}</b><br><br>{safe_content}"
+
+# ============================================
+# CLASE NEXTCLOUD CON WEBDAV
 # ============================================
 
 class NextCloudCubaClient:
     """Cliente especializado para NextCloud desde Cuba usando WebDAV"""
     
     def __init__(self, base_url: str, username: str, password: str):
-        """
-        Inicializa cliente que simula ser cliente oficial
-        
-        Args:
-            base_url: https://tudominio.com/nextcloud/
-            username: tu_usuario
-            password: App Password (desde Ajustes > Seguridad)
-        """
-        # Asegurar formato correcto de URL
         self.base_url = base_url.rstrip('/') + '/'
         self.username = username
         self.password = password
         
-        # Crear sesión con headers de cliente oficial
         self.session = requests.Session()
-        
-        # HEADERS QUE SIMULAN CLIENTE OFICIAL DE NEXTCLOUD
         self.session.headers.update({
             'User-Agent': 'Mozilla/5.0 (Windows) mirall/3.4.1',
             'Accept': 'application/json, text/plain, */*',
@@ -69,28 +70,12 @@ class NextCloudCubaClient:
             'Sec-Fetch-Site': 'same-origin',
         })
         
-        # Autenticación básica
         self.session.auth = (username, password)
-        
-        # Configurar proxies si es necesario (para Cuba)
-        self._setup_proxies()
-        
-        # Verificar conexión
         self._verify_connection()
-    
-    def _setup_proxies(self):
-        """Configurar proxies si es necesario en Cuba"""
-        # Si necesitas proxy, configúralo aquí
-        # self.session.proxies = {
-        #     'http': 'http://proxy:puerto',
-        #     'https': 'http://proxy:puerto',
-        # }
-        pass
     
     def _verify_connection(self):
         """Verificar que podemos conectar a NextCloud"""
         try:
-            # Probar endpoint status
             status_url = urljoin(self.base_url, 'status.php')
             response = self.session.get(status_url, timeout=15)
             
@@ -99,52 +84,36 @@ class NextCloudCubaClient:
                 logger.info(f"✅ Conectado a NextCloud {data.get('productname', '')} v{data.get('version', '')}")
                 return True
             elif response.status_code == 403:
-                logger.warning("⚠️  Acceso denegado. Verifica credenciales y App Password.")
+                logger.warning("⚠️  Acceso denegado. Verifica credenciales.")
                 return False
             else:
                 logger.warning(f"⚠️  Respuesta inesperada: {response.status_code}")
                 return False
                 
-        except requests.exceptions.ConnectTimeout:
-            logger.error("⏱️  Timeout de conexión. Verifica VPN/proxy si es necesario.")
-            return False
         except Exception as e:
             logger.error(f"❌ Error de conexión: {e}")
             return False
     
     def upload_via_webdav(self, file_path: Path, remote_path: str = "") -> Tuple[bool, str]:
         """
-        Subir archivo via WebDAV (método más compatible)
-        
-        Args:
-            file_path: Ruta local al archivo
-            remote_path: Ruta remota relativa (ej: "TelegramBot/2024/")
-            
-        Returns:
-            (éxito, mensaje/url)
+        Subir archivo via WebDAV
         """
         try:
-            # Leer archivo
             if not file_path.exists():
                 return False, f"Archivo no existe: {file_path}"
             
             file_name = file_path.name
             file_size = file_path.stat().st_size
             
-            # Construir URL WebDAV
-            # Formato: https://dominio.com/nextcloud/remote.php/dav/files/USUARIO/ruta/archivo
             webdav_url = f"{self.base_url}remote.php/dav/files/{self.username}/"
             
             if remote_path:
-                # Asegurar formato correcto de ruta
                 remote_path = remote_path.strip('/') + '/'
                 webdav_url += remote_path
             
-            # Codificar nombre de archivo para URL
             encoded_filename = quote(file_name)
             webdav_url += encoded_filename
             
-            # Headers específicos para WebDAV
             headers = {
                 'Content-Type': 'application/octet-stream',
                 'Content-Length': str(file_size),
@@ -153,7 +122,6 @@ class NextCloudCubaClient:
             
             logger.info(f"📤 Subiendo {file_name} ({file_size:,} bytes) a WebDAV...")
             
-            # Leer y subir archivo en chunks
             with open(file_path, 'rb') as f:
                 response = self.session.put(
                     webdav_url,
@@ -162,20 +130,20 @@ class NextCloudCubaClient:
                     timeout=30
                 )
             
-            # Verificar respuesta
             if response.status_code in [201, 204]:
-                # Construir URL de compartir (opcional)
                 share_url = self._create_share(remote_path + file_name if remote_path else file_name)
-                
                 logger.info(f"✅ Subido exitosamente: {file_name}")
-                return True, f"Subido: {file_name}\nURL: {share_url if share_url else webdav_url}"
+                result_msg = f"Subido: {file_name}"
+                if share_url:
+                    result_msg += f"\nURL compartida: {share_url}"
+                return True, result_msg
             else:
                 logger.error(f"❌ Error WebDAV {response.status_code}: {response.text[:200]}")
-                return False, f"Error {response.status_code} en WebDAV"
+                return False, f"Error {response.status_code}: {response.text[:100]}"
                 
         except Exception as e:
             logger.error(f"❌ Error en upload_via_webdav: {e}")
-            return False, f"Excepción: {str(e)}"
+            return False, f"Error: {str(e)}"
     
     def _create_share(self, file_path: str) -> Optional[str]:
         """Crear un enlace público para el archivo"""
@@ -184,8 +152,8 @@ class NextCloudCubaClient:
             
             data = {
                 'path': file_path,
-                'shareType': 3,  # 3 = enlace público
-                'permissions': 1  # 1 = solo lectura
+                'shareType': 3,
+                'permissions': 1
             }
             
             headers = {
@@ -211,17 +179,13 @@ class NextCloudCubaClient:
         """Método alternativo usando API OCS"""
         try:
             file_name = file_path.name
-            
-            # URL para subida
             upload_url = f"{self.base_url}ocs/v2.php/apps/files/api/v1/files/{self.username}"
             
             if remote_folder:
                 upload_url += f"/{remote_folder.strip('/')}"
             
-            # Preparar archivo
             with open(file_path, 'rb') as f:
                 files = {'file': (file_name, f)}
-                
                 headers = {
                     'OCS-APIRequest': 'true',
                     'X-Requested-With': 'XMLHttpRequest'
@@ -242,21 +206,29 @@ class NextCloudCubaClient:
             return False, f"Error OCS: {str(e)}"
 
 # ============================================
-# BOT DE TELEGRAM
+# BOT DE TELEGRAM CON HTML
 # ============================================
 
 class TelegramNextCloudBot:
-    """Bot de Telegram que maneja subidas a NextCloud"""
+    """Bot de Telegram que maneja subidas a NextCloud usando HTML seguro"""
     
     def __init__(self, token: str, nextcloud_client: NextCloudCubaClient):
         self.bot = telebot.TeleBot(token)
         self.nc_client = nextcloud_client
-        self.allowed_users = []  # Lista de IDs permitidos (opcional)
         
         # Configurar handlers
         self._setup_handlers()
-        
         logger.info("🤖 Bot de Telegram inicializado")
+    
+    def _send_html_message(self, chat_id, text, reply_to_message_id=None):
+        """Envía mensaje HTML seguro"""
+        safe_text = escape_html_safe(text).replace('\n', '<br>')
+        self.bot.send_message(
+            chat_id,
+            safe_text,
+            parse_mode='HTML',
+            reply_to_message_id=reply_to_message_id
+        )
     
     def _setup_handlers(self):
         """Configurar comandos del bot"""
@@ -264,82 +236,77 @@ class TelegramNextCloudBot:
         @self.bot.message_handler(commands=['start', 'help'])
         def send_welcome(message):
             welcome_text = """
-            📁 *Bot de Subida a NextCloud*
-            
-            *Comandos disponibles:*
-            /start, /help - Muestra este mensaje
-            /upload - Instrucciones para subir archivos
-            /status - Verifica conexión con NextCloud
-            
-            *Para subir archivos:*
-            Simplemente envía cualquier archivo (documento, imagen, video, etc.)
-            
-            *Carpeta de destino:* TelegramBot/
+<b>📁 Bot de Subida a NextCloud</b>
+
+<b>Comandos disponibles:</b>
+/start, /help - Muestra este mensaje
+/upload - Instrucciones para subir archivos
+/status - Verifica conexión con NextCloud
+
+<b>Para subir archivos:</b>
+Simplemente envía cualquier archivo (documento, imagen, video, etc.)
+
+<b>Carpeta de destino:</b> TelegramBot/
             """
-            self.bot.reply_to(message, welcome_text, parse_mode='Markdown')
+            self.bot.reply_to(message, welcome_text, parse_mode='HTML')
         
         @self.bot.message_handler(commands=['status'])
         def check_status(message):
-            """Verificar estado de NextCloud"""
             self.bot.reply_to(message, "🔍 Verificando conexión con NextCloud...")
-            # La verificación ya se hizo en __init__, pero podemos reconfirmar
-            self.bot.reply_to(message, "✅ Bot operativo y conectado a NextCloud")
+            self.bot.reply_to(message, "✅ Bot operativo y conectado a NextCloud", parse_mode='HTML')
         
         @self.bot.message_handler(commands=['upload'])
         def upload_instructions(message):
             instructions = """
-            📤 *Instrucciones para subir:*
-            
-            1. Envía el archivo directamente al bot
-            2. Tamaño máximo: 2GB (límite de Telegram)
-            3. Formatos soportados: Todos
-            
-            El archivo se subirá a tu NextCloud en la carpeta: TelegramBot/
-            
-            ⚠️ *Nota:* Para archivos grandes (>50MB) la subida puede tardar
+<b>📤 Instrucciones para subir:</b>
+
+1. Envía el archivo directamente al bot
+2. Tamaño máximo: 2GB (límite de Telegram)
+3. Formatos soportados: Todos
+
+El archivo se subirá a tu NextCloud en la carpeta: TelegramBot/
+
+⚠️ <b>Nota:</b> Para archivos grandes (>50MB) la subida puede tardar
             """
-            self.bot.reply_to(message, instructions, parse_mode='Markdown')
+            self.bot.reply_to(message, instructions, parse_mode='HTML')
         
         @self.bot.message_handler(content_types=['document', 'photo', 'video', 'audio'])
         def handle_file(message):
             """Manejar archivos subidos"""
             try:
-                self.bot.reply_to(message, "⏳ Descargando archivo de Telegram...")
+                # Responder inmediatamente
+                self.bot.reply_to(message, "⏳ Descargando archivo de Telegram...", parse_mode='HTML')
                 
                 # Obtener información del archivo
                 file_info = None
-                file_type = None
+                file_name = ""
                 
                 if message.document:
                     file_info = self.bot.get_file(message.document.file_id)
-                    file_type = "document"
-                    file_name = message.document.file_name
+                    file_name = message.document.file_name or f"document_{message.message_id}"
                 elif message.photo:
                     file_info = self.bot.get_file(message.photo[-1].file_id)
-                    file_type = "photo"
                     file_name = f"photo_{message.message_id}.jpg"
                 elif message.video:
                     file_info = self.bot.get_file(message.video.file_id)
-                    file_type = "video"
                     file_name = message.video.file_name or f"video_{message.message_id}.mp4"
                 elif message.audio:
                     file_info = self.bot.get_file(message.audio.file_id)
-                    file_type = "audio"
                     file_name = message.audio.file_name or f"audio_{message.message_id}.mp3"
                 else:
-                    self.bot.reply_to(message, "❌ Tipo de archivo no soportado")
+                    self.bot.reply_to(message, "❌ Tipo de archivo no soportado", parse_mode='HTML')
                     return
                 
                 # Descargar archivo
                 downloaded_file = self.bot.download_file(file_info.file_path)
                 
-                # Guardar localmente temporalmente
+                # Guardar temporalmente
                 local_path = Path(f"temp_{file_name}")
                 with open(local_path, 'wb') as f:
                     f.write(downloaded_file)
                 
                 # Subir a NextCloud
-                self.bot.reply_to(message, f"📤 Subiendo {file_name} a NextCloud...")
+                self.bot.reply_to(message, f"📤 Subiendo {escape_html_safe(file_name)} a NextCloud...", parse_mode='HTML')
                 
                 success, result = self.nc_client.upload_via_webdav(
                     local_path,
@@ -347,18 +314,18 @@ class TelegramNextCloudBot:
                 )
                 
                 # Limpiar archivo temporal
-                local_path.unlink(missing_ok=True)
+                if local_path.exists():
+                    local_path.unlink()
                 
                 if success:
-                    # Acortar mensaje si es muy largo
-                    if len(result) > 4000:
-                        result = result[:4000] + "...\n\n(Mensaje truncado por longitud)"
-                    
-                    reply_msg = f"✅ *Subida exitosa*\n\n{result}"
-                    self.bot.reply_to(message, reply_msg, parse_mode='Markdown')
+                    # Mensaje de éxito con HTML
+                    success_msg = f"✅ <b>Subida exitosa</b><br><br>{escape_html_safe(result)}"
+                    if len(success_msg) > 4000:
+                        success_msg = success_msg[:4000] + "<br>...(mensaje truncado)"
+                    self.bot.reply_to(message, success_msg, parse_mode='HTML')
                 else:
                     # Intentar método alternativo
-                    self.bot.reply_to(message, "🔄 Intentando método alternativo...")
+                    self.bot.reply_to(message, "🔄 Intentando método alternativo...", parse_mode='HTML')
                     
                     success2, result2 = self.nc_client.upload_via_ocs(
                         local_path,
@@ -366,23 +333,29 @@ class TelegramNextCloudBot:
                     )
                     
                     if success2:
-                        self.bot.reply_to(message, f"✅ *Subida exitosa (método alternativo)*\n\n{result2}", parse_mode='Markdown')
+                        success_msg = f"✅ <b>Subida exitosa (método alternativo)</b><br><br>{escape_html_safe(result2)}"
+                        self.bot.reply_to(message, success_msg, parse_mode='HTML')
                     else:
-                        self.bot.reply_to(message, f"❌ *Error en la subida*\n\n{result2}", parse_mode='Markdown')
+                        error_msg = f"❌ <b>Error en la subida</b><br><br>{escape_html_safe(result2)}"
+                        self.bot.reply_to(message, error_msg, parse_mode='HTML')
                         
             except Exception as e:
                 logger.error(f"Error en handle_file: {e}")
-                self.bot.reply_to(message, f"❌ Error interno: {str(e)[:200]}")
+                error_msg = f"❌ <b>Error interno</b><br>{escape_html_safe(str(e)[:200])}"
+                self.bot.reply_to(message, error_msg, parse_mode='HTML')
         
         @self.bot.message_handler(func=lambda message: True)
         def echo_all(message):
-            """Manejar otros mensajes"""
-            self.bot.reply_to(message, "📁 Envíame un archivo para subirlo a NextCloud\nUsa /help para ayuda")
+            reply_text = "📁 Envíame un archivo para subirlo a NextCloud<br>Usa /help para ayuda"
+            self.bot.reply_to(message, reply_text, parse_mode='HTML')
     
     def run(self):
         """Iniciar el bot"""
         logger.info("🚀 Iniciando bot de Telegram...")
-        self.bot.infinity_polling(timeout=30, long_polling_timeout=30)
+        # Limpiar webhook previo si existe
+        self.bot.remove_webhook()
+        time.sleep(1)
+        self.bot.infinity_polling(timeout=30, long_polling_timeout=30, skip_pending=True)
 
 # ============================================
 # FUNCIÓN PRINCIPAL
@@ -393,6 +366,15 @@ def main():
     logger.info("⚡ Iniciando sistema de subida NextCloud para Cuba")
     
     try:
+        # Verificar variables críticas
+        if not NEXTCLOUD_CONFIG["username"] or not NEXTCLOUD_CONFIG["password"]:
+            logger.error("❌ Credenciales de NextCloud no configuradas")
+            return
+        
+        if not TELEGRAM_BOT_TOKEN:
+            logger.error("❌ Token de Telegram no configurado")
+            return
+        
         # 1. Inicializar cliente NextCloud
         logger.info("🔗 Conectando a NextCloud...")
         nc_client = NextCloudCubaClient(
@@ -426,15 +408,7 @@ if __name__ == "__main__":
     📁 NEXTCLOUD UPLOAD BOT PARA CUBA
     =================================
     
-    Configuración:
-    1. Reemplaza los datos en NEXTCLOUD_CONFIG
-    2. Usa App Password en NextCloud (Ajustes > Seguridad)
-    3. Asegúrate de tener Python 3.7+
-    
-    Instalación de dependencias:
-    pip install requests pyTelegramBotAPI
-    
-    Iniciar bot: python bot_nextcloud.py
+    Iniciando bot...
     """)
     
     # Ejecutar bot
