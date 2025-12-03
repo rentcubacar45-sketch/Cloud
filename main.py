@@ -1,12 +1,13 @@
-import requests
+# main.py - VERSIÓN CORREGIDA PARA RENDER
 import os
+import requests
 import telebot
 import logging
 from pathlib import Path
 from urllib.parse import urljoin, quote
-import time
 from typing import Tuple, Optional
-import mimetypes
+
+# ... resto de tu código ...
 
 # ============================================
 # CONFIGURACIÓN - REEMPLAZA CON TUS DATOS
