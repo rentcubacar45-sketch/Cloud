@@ -1,4 +1,3 @@
-# main.py - YO SOY EL DISPOSITIVO WEBAUTHN
 import os
 import requests
 import telebot
@@ -10,7 +9,8 @@ import json
 import base64
 import hashlib
 import secrets
-
+import re
+from typing import Tuple  # <-- AÑADE ESTA LÍNEA
 # ============================================
 # CONFIGURACIÓN - DISPOSITIVO: "Telegram Bot - Chrome WebAuthn Emulator"
 # ============================================
